@@ -1,0 +1,3 @@
+[submodule "client/linux-elf/tiny-c-http-client"]
+	path = client/linux-elf/tiny-c-http-client
+	url = https://github.com/christarcher/tiny-c-http-client.git
