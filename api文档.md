@@ -29,8 +29,12 @@
 #### 提交Flag
 
 ```
-POST /api/c2/submit-flag?flag=flag{test123}
-Response: 200 OK
+POST /api/c2/submit-flag
+Content-Type: application/json
+
+{
+	"flag": "flag{test_flag}"
+}
 ```
 
 #### 心跳包
@@ -53,7 +57,7 @@ Response: 0 或 1 (是否需要反弹shell)
 
 ```
 GET /api/c2/get-rs
-Response: 192.168.1.100|1337
+Response: 192.168.1.100:1337
 ```
 
 ---
