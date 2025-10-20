@@ -45,9 +45,8 @@ Content-Type: application/json
 
 {
     "hostname": "web01",
-    "username": "www-data", 
-    "pid": "1234",
-    "process_name": "flag_monitor"
+    "userinfo": "www-data(1000)", 
+    "processinfo": "bash(36812)"
 }
 
 Response: 0 或 1 (是否需要反弹shell)
