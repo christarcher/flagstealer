@@ -2,12 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
+
+func truncateOutput(output string, maxLen int) string {
+	if len(output) <= maxLen {
+		return output
+	}
+	return output[:maxLen] + fmt.Sprintf("... (截断, 共计 %d 字节)", len(output))
+}
 
 func submitFlagToCompetition(flag string, clientIP string) {
 	go func() {
@@ -24,36 +33,57 @@ func submitFlagToCompetition(flag string, clientIP string) {
 			return
 		}
 
-		time.Sleep(90 * time.Second)
-
-		// 替换模板中的{FLAG}占位符
 		command := strings.ReplaceAll(template, "{FLAG}", flag)
 
-		// 使用sh执行命令
-		cmd := exec.Command("sh", "-c", command)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd", "/c", command)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", command)
+		}
 
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 
-		// 执行命令
 		err := cmd.Run()
 
+		exitCode := 0
 		if err != nil {
-			log.Printf("来自 %s 的Flag: %s, 错误: 命令执行失败: %v, stderr: %s", clientIP, flag, err, stderr.String())
-			addMessage("warning", "Flag提交失败", fmt.Sprintf("来自 %s 的Flag: %s, 错误: %v", clientIP, flag, err))
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else if ctx.Err() == context.DeadlineExceeded {
+				log.Printf("来自 %s 的Flag: %s, 错误: 命令执行超时", clientIP, flag)
+				addMessage("warning", "Flag提交失败", fmt.Sprintf("来自 %s 的Flag: %s, 错误: 命令执行超时", clientIP, flag))
+				return
+			} else {
+				exitCode = -1
+			}
+		}
+
+		stdoutStr := truncateOutput(stdout.String(), 500)
+		stderrStr := truncateOutput(stderr.String(), 500)
+
+		if err != nil {
+			log.Printf("来自 %s 的Flag: %s, 命令执行失败 [退出码: %d], stderr: %s",
+				clientIP, flag, exitCode, stderrStr)
+			addMessage("warning", "Flag提交失败",
+				fmt.Sprintf("来自 %s 的Flag: %s, 错误: 退出码 %d", clientIP, flag, exitCode))
 			return
 		}
 
-		// 记录命令输出
+		log.Printf("成功提交来自 %s 的Flag: %s [退出码: %d]", clientIP, flag, exitCode)
+
 		if stdout.Len() > 0 {
-			log.Printf("Flag提交命令输出: %s", stdout.String())
+			log.Printf("Flag提交命令输出: %s", stdoutStr)
 		}
 		if stderr.Len() > 0 {
-			log.Printf("Flag提交命令stderr: %s", stderr.String())
+			log.Printf("Flag提交命令stderr: %s", stderrStr)
 		}
 
-		log.Printf("成功提交来自 %s 的Flag: %s", clientIP, flag)
 		addMessage("success", "Flag已提交", fmt.Sprintf("成功提交来自 %s 的Flag: %s", clientIP, flag))
 	}()
 }
