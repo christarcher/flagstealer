@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWD C2/EDR 统一管理平台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 10px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            flex-shrink: 0;
+        }
+
+        .header h1 {
+            color: #fff;
+            text-align: center;
+            font-size: 1.8em;
+            margin-bottom: 8px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 6px 12px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9em;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4ade80;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            gap: 10px;
+            min-height: 0;
+        }
+
+        .messages-section {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .clients-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .card h2 {
+            color: #fff;
+            font-size: 1.3em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .btn-danger:hover {
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .btn-success:hover {
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+
+        .message-list, .client-list {
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            min-height: 0;
+        }
+
+        .message-item {
+            padding: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            transition: background-color 0.2s ease;
+        }
+
+        .message-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .message-item:last-child {
+            border-bottom: none;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .message-type {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .message-type.success {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+            border: 1px solid #22c55e;
+        }
+
+        .message-type.warning {
+            background: rgba(251, 146, 60, 0.2);
+            color: #fb923c;
+            border: 1px solid #f97316;
+        }
+
+        .message-type.info {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            border: 1px solid #3b82f6;
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #9ca3af;
+        }
+
+        .message-title {
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 3px;
+            font-size: 14px;
+        }
+
+        .message-content {
+            color: #d1d5db;
+            font-size: 13px;
+        }
+
+        .client-item {
+            padding: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            transition: background-color 0.2s ease;
+        }
+
+        .client-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .client-item:last-child {
+            border-bottom: none;
+        }
+
+        .client-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .client-ip {
+            font-weight: bold;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .client-status {
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .client-status.online {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+            border: 1px solid #22c55e;
+        }
+
+        .client-status.offline {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid #ef4444;
+        }
+
+        .client-info {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .client-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #d1d5db;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #4b5563;
+            transition: .4s;
+            border-radius: 20px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #3b82f6;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+        }
+
+        .empty-state i {
+            font-size: 48px;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .config-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .config-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 500px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-header h3 {
+            color: #fff;
+            margin: 0;
+        }
+
+        .close {
+            color: #9ca3af;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .close:hover {
+            color: #fff;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #d1d5db;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .form-group input::placeholder {
+            color: #9ca3af;
+        }
+
+        .form-group textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 14px;
+            font-family: 'Courier New', Monaco, monospace;
+            resize: vertical;
+            min-height: 120px;
+            line-height: 1.4;
+        }
+
+        .form-group textarea::placeholder {
+            color: #9ca3af;
+        }
+
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        .template-editor {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .template-header {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 12px;
+            color: #9ca3af;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .template-content {
+            position: relative;
+        }
+
+        .template-textarea {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #fff;
+            font-family: 'Courier New', Monaco, monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            padding: 12px;
+            resize: vertical;
+            min-height: 200px;
+            white-space: pre;
+            overflow-wrap: normal;
+            overflow-x: auto;
+        }
+
+        .template-textarea:focus {
+            outline: none;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+
+        .checkbox-group label {
+            margin: 0;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .template-tips {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #93c5fd;
+        }
+
+        .template-tips ul {
+            margin: 5px 0 0 15px;
+        }
+
+        .template-tips li {
+            margin: 3px 0;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            z-index: 1001;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+            max-width: 300px;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .notification.error {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .notification.warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .notification.info {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+
+        .loading {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .messages-section {
+                flex: 1;
+                min-height: 50vh;
+            }
+            
+            .clients-section {
+                flex: 1;
+                min-height: 30vh;
+            }
+            
+            .status-bar {
+                justify-content: center;
+                gap: 10px;
+            }
+            
+            .status-item {
+                font-size: 0.8em;
+                padding: 4px 8px;
+            }
+        }
+
+        /* 音频提示相关 */
+        .sound-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #d1d5db;
+        }
+
+        .volume-slider {
+            width: 60px;
+            height: 4px;
+            border-radius: 2px;
+            background: #4b5563;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+        }
+
+        .volume-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ 0RAYS AWD C2/EDR 统一管理平台</h1>
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-indicator"></div>
+                    <span>系统在线</span>
+                </div>
+                <div class="status-item">
+                    <span>📊 消息: <strong id="messageCount">0</strong></span>
+                </div>
+                <div class="status-item">
+                    <span>💻 客户端: <strong id="clientCount">0</strong></span>
+                </div>
+                <div class="status-item">
+                    <span>🕒 <strong id="lastUpdate">--</strong></span>
+                </div>
+                <button class="config-btn" onclick="openConfigModal()">⚙️ 配置</button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="messages-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📨 实时消息</h2>
+                        <div class="actions">
+                            <div class="sound-controls">
+                                <span>🔊</span>
+                                <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="100">
+                                <label class="switch">
+                                    <input type="checkbox" id="soundEnabled" checked>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="auto-refresh">
+                                <label class="switch">
+                                    <input type="checkbox" id="autoRefresh" checked>
+                                    <span class="slider"></span>
+                                </label>
+                                <span>自动刷新</span>
+                            </div>
+                            <button class="btn btn-small" onclick="refreshMessages()">🔄</button>
+                            <button class="btn btn-danger btn-small" onclick="clearMessages()">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="message-list" id="messageList">
+                        <div class="empty-state">
+                            <i>📭</i>
+                            <div>暂无消息</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="clients-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>💻 客户端</h2>
+                        <div class="actions">
+                            <span style="font-size: 12px; color: #9ca3af;">总计: <strong id="totalClients">0</strong></span>
+                            <button class="btn btn-small" onclick="refreshClients()">🔄 刷新</button>
+                        </div>
+                    </div>
+                    <div class="client-list" id="clientList">
+                        <div class="empty-state">
+                            <i>🖥️</i>
+                            <div>暂无客户端</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 配置模态框 -->
+    <div id="configModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3>⚙️ 系统配置</h3>
+                <span class="close" onclick="closeConfigModal()">&times;</span>
+            </div>
+            
+            <div class="form-group">
+                <label>🔄 反弹Shell地址</label>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="reverseShellAddr" placeholder="IP:端口 (如: 192.168.1.100:1337)" value="127.0.0.1:1337">
+                    <button class="btn" onclick="setReverseShell()">设置</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>📝 Flag提交命令模板</label>
+                <div class="template-editor">
+                    <div class="template-header">
+                        <span>系统命令模板 (支持 {FLAG} 占位符)</span>
+                        <div>
+                            <button class="btn btn-small" onclick="loadTemplate()">🔄 重新加载</button>
+                            <button class="btn btn-success btn-small" onclick="saveTemplate()">💾 保存模板</button>
+                        </div>
+                    </div>
+                    <div class="template-content">
+                        <textarea id="templateEditor" class="template-textarea"
+                                placeholder="curl http://127.0.0.1:80/submit -X POST -H 'Content-Type: application/json' -d '{\"flag\": \"{FLAG}\"}' --max-time 10"></textarea>
+                    </div>
+                </div>
+                <div class="template-tips">
+                    <strong>💡 使用说明:</strong>
+                    <ul>
+                        <li>使用 <code>{FLAG}</code> 占位符，服务端会自动替换为实际的flag值</li>
+                        <li>支持任意shell命令：curl、wget或自定义脚本</li>
+                        <li>命令通过 <code>sh -c</code> 执行，请确保命令格式正确</li>
+                        <li>示例1 (curl POST): <code>curl http://platform.com/submit -d '{"flag":"{FLAG}"}'</code></li>
+                        <li>示例2 (curl GET): <code>curl "http://platform.com/submit?flag={FLAG}"</code></li>
+                        <li>示例3 (wget): <code>wget -O- --post-data='flag={FLAG}' http://platform.com/submit</code></li>
+                        <li>示例4 (脚本): <code>/path/to/submit.sh "{FLAG}"</code></li>
+                        <li>注意：服务端已有90秒延迟，命令中通常不需要再加sleep</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 登录模态框 -->
+    <div id="loginModal" class="modal" style="display: block;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>AWD统一管理平台登录</h3>
+            </div>
+            <div class="form-group">
+                <label>用户名</label>
+                <input type="text" id="loginUsername" placeholder="请输入用户名">
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" id="loginPassword" placeholder="请输入密码">
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="rememberMe">
+                <label for="rememberMe">记住登录信息</label>
+            </div>
+            <div class="form-group" style="margin-top: 20px;">
+                <button class="btn" onclick="login()" style="width: 100%; padding: 10px;">登录</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 音频元素 -->
+    <!-- 替换现有的successSound -->
+    <audio id="successSound" src="mixkit-correct-answer-tone-2870.wav"></audio>
+
+    <!-- 替换现有的warningSound -->
+    <audio id="warningSound" src="mixkit-bell-notification-933.wav"></audio>
+
+    <!-- 替换现有的infoSound -->
+    <audio id="infoSound" src="mixkit-interface-option-select-2573.wav"></audio>
+
+    <script>
+        // 全局变量
+        let autoRefreshEnabled = true;
+        let refreshInterval;
+        let credentials = null;
+        let lastMessageCount = 0;
+        let soundEnabled = true;
+        let volume = 1.0;
+        
+        // 保存登录信息到localStorage
+        function saveLoginInfo(username, password, remember) {
+            if (remember) {
+                localStorage.setItem('awd_username', username);
+                localStorage.setItem('awd_password', password);
+                localStorage.setItem('awd_remember', 'true');
+            } else {
+                localStorage.removeItem('awd_username');
+                localStorage.removeItem('awd_password');
+                localStorage.removeItem('awd_remember');
+            }
+        }
+        
+        // 从localStorage加载登录信息
+        function loadLoginInfo() {
+            const remember = localStorage.getItem('awd_remember');
+            if (remember === 'true') {
+                const username = localStorage.getItem('awd_username');
+                const password = localStorage.getItem('awd_password');
+                if (username) {
+                    document.getElementById('loginUsername').value = username;
+                    document.getElementById('rememberMe').checked = true;
+                }
+                if (password) {
+                    document.getElementById('loginPassword').value = password;
+                }
+                
+                // 如果有完整的登录信息，尝试自动登录
+                if (username && password) {
+                    setTimeout(() => {
+                        login();
+                    }, 500);
+                }
+            }
+        }
+        
+        // 登录函数
+        function login() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            const remember = document.getElementById('rememberMe').checked;
+            
+            if (!username || !password) {
+                showNotification('请输入用户名和密码', 'error');
+                return;
+            }
+            
+            credentials = btoa(username + ':' + password);
+            
+            // 测试登录
+            fetch('/api/browser/messages', {
+                headers: {
+                    'Authorization': 'Basic ' + credentials
+                }
+            }).then(response => {
+                if (response.ok) {
+                    document.getElementById('loginModal').style.display = 'none';
+                    showNotification('登录成功', 'success');
+                    
+                    // 保存登录信息
+                    saveLoginInfo(username, password, remember);
+                    
+                    initializeApp();
+                } else {
+                    showNotification('登录失败，请检查用户名和密码', 'error');
+                    credentials = null;
+                }
+            }).catch(error => {
+                showNotification('连接失败: ' + error.message, 'error');
+                credentials = null;
+            });
+        }
+
+        // API调用函数
+        async function apiCall(url, options = {}) {
+            if (!credentials) {
+                showNotification('请先登录', 'error');
+                throw new Error('Not authenticated');
+            }
+            
+            const defaultOptions = {
+                headers: {
+                    'Authorization': 'Basic ' + credentials
+                }
+            };
+            
+            const mergedOptions = { ...defaultOptions, ...options };
+            
+            try {
+                const response = await fetch(url, mergedOptions);
+                if (response.status === 401) {
+                    showNotification('认证失败，请重新登录', 'error');
+                    document.getElementById('loginModal').style.display = 'block';
+                    credentials = null;
+                    throw new Error('Authentication failed');
+                }
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response;
+            } catch (error) {
+                console.error('API call failed:', error);
+                if (error.message !== 'Authentication failed' && error.message !== 'Not authenticated') {
+                    showNotification('API调用失败: ' + error.message, 'error');
+                }
+                throw error;
+            }
+        }
+
+        // 播放提示音
+        function playSound(type) {
+            if (!soundEnabled) return;
+            
+            const audio = document.getElementById(type + 'Sound');
+            if (audio) {
+                audio.volume = volume;
+                audio.currentTime = 0;
+                audio.play().catch(e => console.log('Sound play failed:', e));
+            }
+        }
+
+        // 显示通知
+        function showNotification(message, type = 'success') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            // 播放对应的提示音
+            playSound(type);
+            
+            setTimeout(() => notification.classList.add('show'), 100);
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => document.body.removeChild(notification), 300);
+            }, 3000);
+        }
+
+        // 格式化时间
+        function formatTime(timestamp) {
+            const date = new Date(timestamp / 1000000);
+            return date.toLocaleString('zh-CN');
+        }
+
+        // 检查客户端是否在线
+        function isClientOnline(lastSeen) {
+            const lastSeenTime = new Date(lastSeen);
+            const now = new Date();
+            const diffMinutes = (now - lastSeenTime) / (1000 * 60);
+            return diffMinutes <= 5;
+        }
+
+        // 获取消息列表
+        async function fetchMessages() {
+            try {
+                const response = await apiCall('/api/browser/messages');
+                const messages = await response.json();
+                
+                // 检查是否有新消息
+                if (messages.length > lastMessageCount) {
+                    const newMessages = messages.slice(0, messages.length - lastMessageCount);
+                    newMessages.forEach(msg => {
+                        if (msg.message_type === 'success') {
+                            playSound('success');
+                        } else if (msg.message_type === 'warning') {
+                            playSound('warning');
+                        } else {
+                            playSound('info');
+                        }
+                    });
+                }
+                lastMessageCount = messages.length;
+                
+                document.getElementById('messageCount').textContent = messages.length;
+                
+                const messageList = document.getElementById('messageList');
+                
+                if (messages.length === 0) {
+                    messageList.innerHTML = `
+                        <div class="empty-state">
+                            <i>📭</i>
+                            <div>暂无消息</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                messageList.innerHTML = messages.map(msg => `
+                    <div class="message-item">
+                        <div class="message-header">
+                            <span class="message-type ${msg.message_type}">${msg.message_type}</span>
+                            <span class="message-time">${formatTime(msg.timestamp)}</span>
+                        </div>
+                        <div class="message-title">${msg.title}</div>
+                        <div class="message-content">${msg.content}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to fetch messages:', error);
+            }
+        }
+
+        // 获取客户端列表
+        async function fetchClients() {
+            try {
+                const response = await apiCall('/api/browser/getclients');
+                const clients = await response.json();
+                
+                document.getElementById('clientCount').textContent = clients.length;
+                document.getElementById('totalClients').textContent = clients.length;
+                
+                const clientList = document.getElementById('clientList');
+                
+                if (clients.length === 0) {
+                    clientList.innerHTML = `
+                        <div class="empty-state">
+                            <i>🖥️</i>
+                            <div>暂无客户端</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                clientList.innerHTML = clients.map(client => {
+                    const online = isClientOnline(client.last_seen);
+                    return `
+                        <div class="client-item">
+                            <div class="client-header">
+                                <span class="client-ip">${client.ip}</span>
+                                <span class="client-status ${online ? 'online' : 'offline'}">
+                                    ${online ? '在线' : '离线'}
+                                </span>
+                            </div>
+                            <div class="client-info">
+                                <div><strong>主机:</strong> ${client.hostname}</div>
+                                <div><strong>用户:</strong> ${client.username}</div>
+                                <div><strong>进程:</strong> ${client.process_name} (${client.pid})</div>
+                                <div><strong>最后上线:</strong> ${new Date(client.last_seen).toLocaleString('zh-CN')}</div>
+                            </div>
+                            <div class="client-actions">
+                                <button class="btn btn-small ${client.revshell ? 'btn-danger' : 'btn-success'}" 
+                                        onclick="toggleRevShell('${client.ip}', ${client.revshell ? 0 : 1})">
+                                    ${client.revshell ? '禁用反弹Shell' : '启用反弹Shell'}
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Failed to fetch clients:', error);
+            }
+        }
+
+        // setFlagAPI 已废弃 - Flag提交现在使用命令模板，无需单独配置API地址
+
+        // 设置反弹Shell地址
+        async function setReverseShell() {
+            const addr = document.getElementById('reverseShellAddr').value;
+            
+            if (!addr) {
+                showNotification('请填写反弹Shell地址', 'error');
+                return;
+            }
+            
+            try {
+                await apiCall(`/api/browser/set-rs?addr=${encodeURIComponent(addr)}`);
+                showNotification('反弹Shell地址已更新');
+                closeConfigModal();
+            } catch (error) {
+                console.error('Failed to set reverse shell:', error);
+            }
+        }
+
+        // 切换客户端反弹Shell状态
+        async function toggleRevShell(ip, revshell) {
+            try {
+                await apiCall(`/api/browser/set-client?ip=${encodeURIComponent(ip)}&revshell=${revshell}`);
+                showNotification(`客户端 ${ip} 反弹Shell状态已更新`);
+                fetchClients();
+            } catch (error) {
+                console.error('Failed to toggle reverse shell:', error);
+            }
+        }
+
+        // 清空消息
+        async function clearMessages() {
+            if (!confirm('确定要清空所有消息吗？')) {
+                return;
+            }
+            
+            try {
+                await apiCall('/api/browser/clearmessage');
+                showNotification('消息已清空');
+                lastMessageCount = 0;
+                fetchMessages();
+            } catch (error) {
+                console.error('Failed to clear messages:', error);
+            }
+        }
+
+        // 手动刷新消息
+        function refreshMessages() {
+            fetchMessages();
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
+        }
+
+        // 手动刷新客户端
+        function refreshClients() {
+            fetchClients();
+        }
+
+        // 模态框控制
+        function openConfigModal() {
+            document.getElementById('configModal').style.display = 'block';
+            // 打开配置时自动加载模板
+            loadTemplate();
+        }
+
+        function closeConfigModal() {
+            document.getElementById('configModal').style.display = 'none';
+        }
+
+        // 加载模板
+        async function loadTemplate() {
+            try {
+                const response = await apiCall('/api/browser/get-template');
+                const template = await response.text();
+                document.getElementById('templateEditor').value = template;
+            } catch (error) {
+                console.error('Failed to load template:', error);
+                showNotification('加载模板失败', 'error');
+            }
+        }
+
+        // 保存模板
+        async function saveTemplate() {
+            const template = document.getElementById('templateEditor').value;
+            
+            if (!template.trim()) {
+                showNotification('模板内容不能为空', 'error');
+                return;
+            }
+            
+            if (!template.includes('{FLAG}')) {
+                showNotification('模板必须包含 {FLAG} 占位符', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/browser/edit-template', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Basic ' + credentials,
+                        'Content-Type': 'text/plain'
+                    },
+                    body: template
+                });
+                
+                if (response.ok) {
+                    showNotification('模板保存成功', 'success');
+                } else {
+                    const errorText = await response.text();
+                    showNotification('模板保存失败: ' + errorText, 'error');
+                }
+            } catch (error) {
+                console.error('Failed to save template:', error);
+                showNotification('保存模板失败: ' + error.message, 'error');
+            }
+        }
+
+        // 开始自动刷新
+        function startAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            
+            refreshInterval = setInterval(() => {
+                if (autoRefreshEnabled && credentials) {
+                    fetchMessages();
+                    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
+                }
+            }, 1000);
+        }
+
+        // 初始化应用
+        function initializeApp() {
+            fetchMessages();
+            fetchClients();
+            startAutoRefresh();
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 加载保存的登录信息
+            loadLoginInfo();
+            
+            // 设置事件监听器
+            document.getElementById('autoRefresh').addEventListener('change', function(e) {
+                autoRefreshEnabled = e.target.checked;
+            });
+
+            document.getElementById('soundEnabled').addEventListener('change', function(e) {
+                soundEnabled = e.target.checked;
+            });
+
+            document.getElementById('volumeSlider').addEventListener('input', function(e) {
+                volume = e.target.value / 100;
+            });
+
+            // 登录时回车键支持
+            document.getElementById('loginPassword').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    login();
+                }
+            });
+
+            // 模板编辑器快捷键
+            document.getElementById('templateEditor').addEventListener('keydown', function(e) {
+                // Ctrl+S 保存模板
+                if (e.ctrlKey && e.key === 's') {
+                    e.preventDefault();
+                    saveTemplate();
+                }
+                // Tab键插入4个空格
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const start = this.selectionStart;
+                    const end = this.selectionEnd;
+                    this.value = this.value.substring(0, start) + '    ' + this.value.substring(end);
+                    this.selectionStart = this.selectionEnd = start + 4;
+                }
+            });
+
+            // 模态框点击外部关闭
+            window.onclick = function(event) {
+                const configModal = document.getElementById('configModal');
+                if (event.target === configModal) {
+                    closeConfigModal();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
