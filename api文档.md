@@ -177,9 +177,8 @@ Response:
     {
         "ip": "192.168.1.100",
         "hostname": "web01",
-        "username": "www-data(1000)",
-        "process_name": "bash(36812)",
-        "pid": "",
+        "userinfo": "www-data(1000)",
+        "processinfo": "bash(36812)",
         "last_seen": "2024-10-21T11:30:00+08:00",
         "revshell": 0
     }

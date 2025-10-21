@@ -3,9 +3,8 @@ package main
 type Client struct {
 	IP          string `json:"ip"`
 	Hostname    string `json:"hostname"`
-	Username    string `json:"username"`
-	ProcessName string `json:"process_name"`
-	PID         string `json:"pid"`
+	UserInfo    string `json:"userinfo"`
+	ProcessInfo string `json:"processinfo"`
 	LastSeen    string `json:"last_seen"`
 	RevShell    int    `json:"revshell"`
 }

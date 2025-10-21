@@ -24,9 +24,8 @@ func initDB() error {
 		`CREATE TABLE IF NOT EXISTS clients (
 			ip TEXT PRIMARY KEY,
 			hostname TEXT,
-			username TEXT,
-			process_name TEXT,
-			pid TEXT,
+			userinfo TEXT,
+			processinfo TEXT,
 			last_seen TEXT,
 			revshell INTEGER DEFAULT 0
 		)`,
@@ -49,8 +48,8 @@ func initDB() error {
 	}
 
 	defaultConfigs := map[string]string{
-		"revshell_addr":   "127.0.0.1:1337",
-		"submit_template": "curl http://127.0.0.1:80/submit -X POST -H 'Content-Type: application/json' -d '{\"flag\": \"{FLAG}\"}' --max-time 10",
+		"revshell_addr":   "192.168.1.1:1337",
+		"submit_template": "curl http://192.168.1.1/submit -X POST -H 'Content-Type: application/json' -d '{\"flag\": \"{FLAG}\"}'",
 	}
 
 	for key, value := range defaultConfigs {

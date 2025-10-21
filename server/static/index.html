@@ -1068,8 +1068,8 @@
                             </div>
                             <div class="client-info">
                                 <div><strong>主机:</strong> ${client.hostname}</div>
-                                <div><strong>用户:</strong> ${client.username}</div>
-                                <div><strong>进程:</strong> ${client.process_name} (${client.pid})</div>
+                                <div><strong>用户:</strong> ${client.userinfo}</div>
+                                <div><strong>进程:</strong> ${client.processinfo}</div>
                                 <div><strong>最后上线:</strong> ${new Date(client.last_seen).toLocaleString('zh-CN')}</div>
                             </div>
                             <div class="client-actions">
