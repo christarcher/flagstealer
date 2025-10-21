@@ -1,1 +1,4 @@
 CLAUDE.md
+**/.claude/
+server/awd-server.db
+server/awd-server
